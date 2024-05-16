@@ -81,7 +81,7 @@ func HandlePostData(w http.ResponseWriter, r *http.Request) {
 		log.Fatal(err)
 	}
 
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
