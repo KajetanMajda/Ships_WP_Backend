@@ -33,22 +33,31 @@ type BoardResponse struct {
 	Board []string `json:"board"`
 }
 
-// Struct for fire request
 type FireRequest struct {
 	Coord string `json:"coord"`
 }
 
-// Struct for fire response
 type FireResponse struct {
 	Result string `json:"result"`
+}
+
+type GameDescResponse struct {
+	Desc     string `json:"desc"`
+	Nick     string `json:"nick"`
+	OppDesc  string `json:"opp_desc"`
+	Opponent string `json:"opponent"`
 }
 
 // Global variables to store responses
 var gameStatusResponse GameStatusResponse
 var boardResponse BoardResponse
+var gameDescResponse GameDescResponse
 
 // Global variable for the auth token
 var authToken string
+
+// Global variable to track if game description has been fetched
+var isGameDescFetched bool
 
 // Handle POST request with data from frontend to start game (board, nick, desc, target_nick, wpbot)
 func HandlePostData(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +94,7 @@ func HandlePostData(w http.ResponseWriter, r *http.Request) {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		// Send one GET request to get game status
+		// Wysyłanie jednego żądania GET w celu uzyskania statusu gry
 		gameStatusResponse, err = SendGetRequest(client, "https://go-pjatk-server.fly.dev/api/game", authToken)
 		if err != nil {
 			log.Fatal(err)
@@ -97,13 +106,31 @@ func HandlePostData(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("ShouldFire:", gameStatusResponse.ShouldFire)
 		fmt.Println("Timer:", gameStatusResponse.Timer)
 
-		// Send one GET request to get the board data
+		// Wysyłanie jednego żądania GET w celu uzyskania danych planszy
 		boardResponse, err = SendGetBoardRequest(client, "https://go-pjatk-server.fly.dev/api/game/board", authToken)
 		if err != nil {
 			log.Fatal(err)
 		}
 		fmt.Println("Board:", boardResponse.Board)
+
+		if gameStatusResponse.GameStatus == "game_in_progress" && !isGameDescFetched {
+			// Pobieranie nicku i opisu
+			gameDescResponse, err = GetNickAndDesc(client, "https://go-pjatk-server.fly.dev/api/game/desc", authToken)
+			if err != nil {
+				log.Fatal(err)
+			}
+			isGameDescFetched = true
+			fmt.Println("Nick:", gameDescResponse.Nick)
+			fmt.Println("Desc:", gameDescResponse.Desc)
+			fmt.Println("Opponent:", gameDescResponse.Opponent)
+			fmt.Println("OppDesc:", gameDescResponse.OppDesc)
+		}
 	}
+}
+
+func SendBoardToFront(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(boardResponse)
 }
 
 func SendDataToFront(w http.ResponseWriter, r *http.Request) {
@@ -111,9 +138,9 @@ func SendDataToFront(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(gameStatusResponse)
 }
 
-func SendBoardToFront(w http.ResponseWriter, r *http.Request) {
+func SendDescToFront(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(boardResponse)
+	json.NewEncoder(w).Encode(gameDescResponse)
 }
 
 // Handle POST from Frontend with coord only
@@ -261,12 +288,74 @@ func SendGetBoardRequest(client *http.Client, url string, authToken string) (Boa
 	return boardResponse, nil
 }
 
+// Funkcja do pobierania nicku i opisu z serwera
+func GetNickAndDesc(client *http.Client, url string, authToken string) (GameDescResponse, error) {
+	var gameDescResponse GameDescResponse
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return gameDescResponse, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-auth-token", authToken)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return gameDescResponse, err
+	}
+	defer resp.Body.Close()
+
+	err = json.NewDecoder(resp.Body).Decode(&gameDescResponse)
+	if err != nil {
+		return gameDescResponse, err
+	}
+
+	return gameDescResponse, nil
+}
+
+// Handle DELETE request to abandon game
+func HandleAbandonGame(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	authToken := r.Header.Get("x-auth-token")
+	if authToken == "" {
+		http.Error(w, "Missing auth token", http.StatusUnauthorized)
+		return
+	}
+
+	client := &http.Client{}
+	req, err := http.NewRequest(http.MethodDelete, "https://go-pjatk-server.fly.dev/api/game/abandon", nil)
+	if err != nil {
+		http.Error(w, "Error creating request", http.StatusInternalServerError)
+		return
+	}
+	req.Header.Set("x-auth-token", authToken)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		http.Error(w, "Error sending request", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		http.Error(w, "Failed to abandon game", resp.StatusCode)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Game abandoned successfully"))
+}
+
 func StartServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/gameData", SendDataToFront)
 	mux.HandleFunc("/api/boardData", SendBoardToFront)
+	mux.HandleFunc("/api/descData", SendDescToFront)
 	mux.HandleFunc("/api/data", HandlePostData)
-	mux.HandleFunc("/api/fire", HandleFireRequest) // New endpoint for fire requests
+	mux.HandleFunc("/api/fire", HandleFireRequest) // Nowy endpoint dla żądań strzałów
 	handler := cors.Default().Handler(mux)
 
 	fmt.Println("Starting server at port 8080")
