@@ -1,7 +1,13 @@
 package gamestart
 
+/*Pytania, Jak mam zrobic abonded? Czy jak koncze gre i mam status ended to cos sie wysyla do serwera czy nie?
+Jak mam zrobic zeby po 60 sekundach gra sie konczyla? oraz jak mam zatrzymac wysyalanie danych do serwera
+Jak ma dzialac wyszukiwanie przeciwnika oraz jak ma dzialac czekanie na przeciwnika
+abond mam ustawione na 40s a nie na 0s*/
+
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -59,6 +65,9 @@ var authToken string
 // Global variable to track if game description has been fetched
 var isGameDescFetched bool
 
+// Global variable to track if game has been abandoned
+var isGameAbandoned bool
+
 // Handle POST request with data from frontend to start game (board, nick, desc, target_nick, wpbot)
 func HandlePostData(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -90,6 +99,8 @@ func HandlePostData(w http.ResponseWriter, r *http.Request) {
 		log.Fatal(err)
 	}
 
+	gameStatusResponse.Timer = 60
+
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
@@ -99,6 +110,7 @@ func HandlePostData(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Fatal(err)
 		}
+
 		fmt.Println("GameStatus:", gameStatusResponse.GameStatus)
 		fmt.Println("Nick:", gameStatusResponse.Nick)
 		fmt.Println("Opponent:", gameStatusResponse.Opponent)
@@ -125,17 +137,38 @@ func HandlePostData(w http.ResponseWriter, r *http.Request) {
 			fmt.Println("Opponent:", gameDescResponse.Opponent)
 			fmt.Println("OppDesc:", gameDescResponse.OppDesc)
 		}
+
+		// Porzucenie gry, gdy timer osiągnie zero
+		if gameStatusResponse.Timer == 40 && !isGameAbandoned {
+			err = SendAbandonRequest(client, "https://go-pjatk-server.fly.dev/api/game/abandon", authToken)
+			if err != nil {
+				log.Fatal(err)
+			}
+			fmt.Println("Game abandoned due to timer reaching zero")
+			isGameAbandoned = true
+			gameStatusResponse.GameStatus = "abandoned"
+			break
+		}
+
+		if isGameAbandoned {
+			break
+		}
 	}
+
+}
+
+// Funkcja do wysyłania danych do frontendu
+func SendDataToFront(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if isGameAbandoned {
+		gameStatusResponse.GameStatus = "abandoned"
+	}
+	json.NewEncoder(w).Encode(gameStatusResponse)
 }
 
 func SendBoardToFront(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(boardResponse)
-}
-
-func SendDataToFront(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(gameStatusResponse)
 }
 
 func SendDescToFront(w http.ResponseWriter, r *http.Request) {
@@ -179,6 +212,64 @@ func HandleFireRequest(w http.ResponseWriter, r *http.Request) {
 	// Send the response back to the frontend
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(fireResponse)
+}
+
+// Handle DELETE request to abandon game
+func HandleAbandonGame(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	authToken := r.Header.Get("x-auth-token")
+	if authToken == "" {
+		http.Error(w, "Missing auth token", http.StatusUnauthorized)
+		return
+	}
+
+	client := &http.Client{}
+	req, err := http.NewRequest(http.MethodDelete, "https://go-pjatk-server.fly.dev/api/game/abandon", nil)
+	if err != nil {
+		http.Error(w, "Error creating request", http.StatusInternalServerError)
+		return
+	}
+	req.Header.Set("x-auth-token", authToken)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		http.Error(w, "Error sending request", http.StatusInternalServerError)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		http.Error(w, "Failed to abandon game", resp.StatusCode)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Game abandoned successfully"))
+}
+
+// Send DELETE request to abandon game
+func SendAbandonRequest(client *http.Client, url string, authToken string) error {
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("x-auth-token", authToken)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to abandon game, status code: %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 // Send POST request with fire coord
@@ -312,41 +403,18 @@ func GetNickAndDesc(client *http.Client, url string, authToken string) (GameDesc
 	return gameDescResponse, nil
 }
 
-// Handle DELETE request to abandon game
-func HandleAbandonGame(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-		return
-	}
+var srv *http.Server
 
-	authToken := r.Header.Get("x-auth-token")
-	if authToken == "" {
-		http.Error(w, "Missing auth token", http.StatusUnauthorized)
-		return
+// RestartServer function to restart the server
+func RestartServer() {
+	if srv != nil {
+		fmt.Println("Shutting down server...")
+		if err := srv.Shutdown(context.Background()); err != nil {
+			log.Fatalf("Server Shutdown Failed:%+v", err)
+		}
 	}
-
-	client := &http.Client{}
-	req, err := http.NewRequest(http.MethodDelete, "https://go-pjatk-server.fly.dev/api/game/abandon", nil)
-	if err != nil {
-		http.Error(w, "Error creating request", http.StatusInternalServerError)
-		return
-	}
-	req.Header.Set("x-auth-token", authToken)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		http.Error(w, "Error sending request", http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		http.Error(w, "Failed to abandon game", resp.StatusCode)
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Game abandoned successfully"))
+	fmt.Println("Starting new server instance...")
+	StartServer()
 }
 
 func StartServer() {
@@ -355,12 +423,18 @@ func StartServer() {
 	mux.HandleFunc("/api/boardData", SendBoardToFront)
 	mux.HandleFunc("/api/descData", SendDescToFront)
 	mux.HandleFunc("/api/data", HandlePostData)
-	mux.HandleFunc("/api/fire", HandleFireRequest) // Nowy endpoint dla żądań strzałów
+	mux.HandleFunc("/api/fire", HandleFireRequest)
+	mux.HandleFunc("/api/abandon", HandleAbandonGame)
 	handler := cors.Default().Handler(mux)
+
+	srv = &http.Server{
+		Addr:    ":8080",
+		Handler: handler,
+	}
 
 	fmt.Println("Starting server at port 8080")
 
-	if err := http.ListenAndServe(":8080", handler); err != nil {
-		log.Fatal(err)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("ListenAndServe(): %v", err)
 	}
 }
