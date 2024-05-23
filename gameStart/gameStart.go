@@ -1,9 +1,6 @@
 package gamestart
 
-/*Pytania, Jak mam zrobic abonded? Czy jak koncze gre i mam status ended to cos sie wysyla do serwera czy nie?
-Jak mam zrobic zeby po 60 sekundach gra sie konczyla? oraz jak mam zatrzymac wysyalanie danych do serwera
-Jak ma dzialac wyszukiwanie przeciwnika oraz jak ma dzialac czekanie na przeciwnika
-abond mam ustawione na 40s a nie na 0s*/
+/*Jak ma dzialac wyszukiwanie przeciwnika oraz jak ma dzialac czekanie na przeciwnika*/
 
 import (
 	"bytes"
@@ -139,7 +136,7 @@ func HandlePostData(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Porzucenie gry, gdy timer osiągnie zero
-		if gameStatusResponse.Timer == 40 && !isGameAbandoned {
+		if gameStatusResponse.Timer == 1 && !isGameAbandoned {
 			err = SendAbandonRequest(client, "https://go-pjatk-server.fly.dev/api/game/abandon", authToken)
 			if err != nil {
 				log.Fatal(err)
@@ -153,6 +150,11 @@ func HandlePostData(w http.ResponseWriter, r *http.Request) {
 		if isGameAbandoned {
 			break
 		}
+
+		if gameStatusResponse.GameStatus == "waiting" {
+			sendWaiting(authToken)
+		}
+
 	}
 
 }
@@ -401,6 +403,26 @@ func GetNickAndDesc(client *http.Client, url string, authToken string) (GameDesc
 	}
 
 	return gameDescResponse, nil
+}
+
+func sendWaiting(authToken string) {
+	url := "https://go-pjatk-server.fly.dev/api/game/refresh"
+
+	// Tworzymy nowy obiekt żądania
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		log.Fatalf("Error creating request: %v", err)
+	}
+
+	// Ustawiamy nagłówek autoryzacyjny
+	req.Header.Set("x-auth-token", authToken)
+
+	// Wysyłamy żądanie
+	client := &http.Client{}
+	_, err = client.Do(req)
+	if err != nil {
+		log.Fatalf("Error sending request: %v", err)
+	}
 }
 
 var srv *http.Server
