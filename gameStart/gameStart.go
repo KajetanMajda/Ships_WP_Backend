@@ -1,7 +1,5 @@
 package gamestart
 
-/*Jak ma dzialac wyszukiwanie przeciwnika oraz jak ma dzialac czekanie na przeciwnika*/
-
 import (
 	"bytes"
 	"context"
@@ -49,6 +47,10 @@ type GameDescResponse struct {
 	Nick     string `json:"nick"`
 	OppDesc  string `json:"opp_desc"`
 	Opponent string `json:"opponent"`
+}
+type Player struct {
+	Nick       string `json:"nick"`
+	GameStatus string `json:"game_status"`
 }
 
 // Global variables to store responses
@@ -152,7 +154,7 @@ func HandlePostData(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if gameStatusResponse.GameStatus == "waiting" {
-			sendWaiting(authToken)
+			SendWaiting(authToken)
 		}
 
 	}
@@ -405,11 +407,9 @@ func GetNickAndDesc(client *http.Client, url string, authToken string) (GameDesc
 	return gameDescResponse, nil
 }
 
-func sendWaiting(authToken string) {
-	url := "https://go-pjatk-server.fly.dev/api/game/refresh"
-
+func SendWaiting(authToken string) {
 	// Tworzymy nowy obiekt żądania
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest(http.MethodGet, "https://go-pjatk-server.fly.dev/api/game/refresh", nil)
 	if err != nil {
 		log.Fatalf("Error creating request: %v", err)
 	}
@@ -422,6 +422,40 @@ func sendWaiting(authToken string) {
 	_, err = client.Do(req)
 	if err != nil {
 		log.Fatalf("Error sending request: %v", err)
+	}
+}
+
+func GetLobby() {
+	// Tworzymy nowy obiekt żądania
+	req, err := http.NewRequest(http.MethodGet, "https://go-pjatk-server.fly.dev/api/lobby", nil)
+	if err != nil {
+		log.Fatalf("Error creating request: %v", err)
+	}
+
+	// Wysyłamy żądanie
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Fatalf("Error sending request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Odczytujemy odpowiedź
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatalf("Error reading response: %v", err)
+	}
+
+	// Przetwarzamy odpowiedź JSON
+	var players []Player
+	err = json.Unmarshal(body, &players)
+	if err != nil {
+		log.Fatalf("Error unmarshalling response: %v", err)
+	}
+
+	// Wyświetlamy przetworzoną odpowiedź
+	for _, player := range players {
+		fmt.Printf("Nick: %s, Game Status: %s\n", player.Nick, player.GameStatus)
 	}
 }
 
@@ -448,6 +482,8 @@ func StartServer() {
 	mux.HandleFunc("/api/fire", HandleFireRequest)
 	mux.HandleFunc("/api/abandon", HandleAbandonGame)
 	handler := cors.Default().Handler(mux)
+
+	GetLobby()
 
 	srv = &http.Server{
 		Addr:    ":8080",
