@@ -153,6 +153,11 @@ func HandlePostData(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
+		if gameStatusResponse.GameStatus == "ended" {
+			fmt.Println("Game abandoned by Player")
+			break
+		}
+
 		if gameStatusResponse.GameStatus == "waiting" {
 			SendWaiting(authToken)
 		}
@@ -220,39 +225,28 @@ func HandleFireRequest(w http.ResponseWriter, r *http.Request) {
 
 // Handle DELETE request to abandon game
 func HandleAbandonGame(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
+	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
 	}
 
-	authToken := r.Header.Get("x-auth-token")
-	if authToken == "" {
-		http.Error(w, "Missing auth token", http.StatusUnauthorized)
-		return
-	}
-
-	client := &http.Client{}
-	req, err := http.NewRequest(http.MethodDelete, "https://go-pjatk-server.fly.dev/api/game/abandon", nil)
+	// Decode the body (even if it's empty)
+	var requestBody map[string]interface{}
+	err := json.NewDecoder(r.Body).Decode(&requestBody)
 	if err != nil {
-		http.Error(w, "Error creating request", http.StatusInternalServerError)
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	req.Header.Set("x-auth-token", authToken)
 
-	resp, err := client.Do(req)
-	if err != nil {
-		http.Error(w, "Error sending request", http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		http.Error(w, "Failed to abandon game", resp.StatusCode)
-		return
-	}
+	go func() {
+		err := SendAbandonRequest(&http.Client{}, "https://go-pjatk-server.fly.dev/api/game/abandon", authToken)
+		if err != nil {
+			fmt.Printf("Error sending request: %v\n", err)
+		}
+	}()
 
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Game abandoned successfully"))
+	json.NewEncoder(w).Encode(map[string]string{"message": "Request to abandon game sent"})
 }
 
 // Send DELETE request to abandon game
