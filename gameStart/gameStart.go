@@ -48,9 +48,23 @@ type GameDescResponse struct {
 	OppDesc  string `json:"opp_desc"`
 	Opponent string `json:"opponent"`
 }
+
 type Player struct {
 	Nick       string `json:"nick"`
 	GameStatus string `json:"game_status"`
+}
+
+// Add new StatsResponse struct
+type StatsResponse struct {
+	Stats []PlayerStats `json:"stats"`
+}
+
+type PlayerStats struct {
+	Nick   string `json:"nick"`
+	Games  int    `json:"games"`
+	Wins   int    `json:"wins"`
+	Rank   int    `json:"rank"`
+	Points int    `json:"points"`
 }
 
 // Global variables to store responses
@@ -249,6 +263,24 @@ func HandleAbandonGame(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "Request to abandon game sent"})
 }
 
+// Handle GET request for game stats
+func HandleGetStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	client := &http.Client{}
+	statsResponse, err := FetchStats(client, "https://go-pjatk-server.fly.dev/api/stats")
+	if err != nil {
+		http.Error(w, "Error fetching stats", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(statsResponse)
+}
+
 // Send DELETE request to abandon game
 func SendAbandonRequest(client *http.Client, url string, authToken string) error {
 	req, err := http.NewRequest(http.MethodDelete, url, nil)
@@ -377,6 +409,30 @@ func SendGetBoardRequest(client *http.Client, url string, authToken string) (Boa
 	return boardResponse, nil
 }
 
+// Fetch stats from the external server
+func FetchStats(client *http.Client, url string) (StatsResponse, error) {
+	var statsResponse StatsResponse
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return statsResponse, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return statsResponse, err
+	}
+	defer resp.Body.Close()
+
+	err = json.NewDecoder(resp.Body).Decode(&statsResponse)
+	if err != nil {
+		return statsResponse, err
+	}
+
+	return statsResponse, nil
+}
+
 // Funkcja do pobierania nicku i opisu z serwera
 func GetNickAndDesc(client *http.Client, url string, authToken string) (GameDescResponse, error) {
 	var gameDescResponse GameDescResponse
@@ -475,6 +531,7 @@ func StartServer() {
 	mux.HandleFunc("/api/data", HandlePostData)
 	mux.HandleFunc("/api/fire", HandleFireRequest)
 	mux.HandleFunc("/api/abandon", HandleAbandonGame)
+	mux.HandleFunc("/api/stats", HandleGetStats)
 	handler := cors.Default().Handler(mux)
 
 	GetLobby()
