@@ -66,6 +66,10 @@ type PlayerStats struct {
 	Rank   int    `json:"rank"`
 	Points int    `json:"points"`
 }
+type LobbyGet struct {
+	Nick       string `json:"nick"`
+	GameStatus string `json:"game_status"`
+}
 
 // Global variables to store responses
 var gameStatusResponse GameStatusResponse
@@ -263,24 +267,6 @@ func HandleAbandonGame(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"message": "Request to abandon game sent"})
 }
 
-// Handle GET request for game stats
-func HandleGetStats(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-		return
-	}
-
-	client := &http.Client{}
-	statsResponse, err := FetchStats(client, "https://go-pjatk-server.fly.dev/api/stats")
-	if err != nil {
-		http.Error(w, "Error fetching stats", http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(statsResponse)
-}
-
 // Send DELETE request to abandon game
 func SendAbandonRequest(client *http.Client, url string, authToken string) error {
 	req, err := http.NewRequest(http.MethodDelete, url, nil)
@@ -433,6 +419,71 @@ func FetchStats(client *http.Client, url string) (StatsResponse, error) {
 	return statsResponse, nil
 }
 
+func HandleGetStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	client := &http.Client{}
+	statsResponse, err := FetchStats(client, "https://go-pjatk-server.fly.dev/api/stats")
+	if err != nil {
+		http.Error(w, "Error fetching stats", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(statsResponse)
+}
+
+func FetchLobby(client *http.Client, url string) ([]LobbyGet, error) {
+	var lobbyResponse []LobbyGet
+
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return lobbyResponse, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return lobbyResponse, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return lobbyResponse, fmt.Errorf("error: received status code %d", resp.StatusCode)
+	}
+
+	err = json.NewDecoder(resp.Body).Decode(&lobbyResponse)
+	if err != nil {
+		return lobbyResponse, err
+	}
+
+	return lobbyResponse, nil
+}
+
+func HandleGetLobby(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	client := &http.Client{}
+	lobbyResponse, err := FetchLobby(client, "https://go-pjatk-server.fly.dev/api/lobby")
+	if err != nil {
+		log.Printf("Error fetching lobby: %v", err)
+		http.Error(w, "Error fetching lobby", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(lobbyResponse); err != nil {
+		log.Printf("Error encoding response: %v", err)
+		http.Error(w, "Error encoding response", http.StatusInternalServerError)
+	}
+}
+
 // Funkcja do pobierania nicku i opisu z serwera
 func GetNickAndDesc(client *http.Client, url string, authToken string) (GameDescResponse, error) {
 	var gameDescResponse GameDescResponse
@@ -532,6 +583,7 @@ func StartServer() {
 	mux.HandleFunc("/api/fire", HandleFireRequest)
 	mux.HandleFunc("/api/abandon", HandleAbandonGame)
 	mux.HandleFunc("/api/stats", HandleGetStats)
+	mux.HandleFunc("/api/lobby", HandleGetLobby)
 	handler := cors.Default().Handler(mux)
 
 	GetLobby()
