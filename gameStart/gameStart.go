@@ -17,8 +17,8 @@ type Data struct {
 	Coords     []string `json:"coords"`
 	Nick       string   `json:"nick"`
 	Desc       string   `json:"desc"`
-	TargetNick string   `json:"target_nick"`
 	Wpbot      bool     `json:"wpbot"`
+	TargetNick string   `json:"target_nick"`
 }
 
 type GameStatusResponse struct {
@@ -101,6 +101,7 @@ func HandlePostData(w http.ResponseWriter, r *http.Request) {
 	var data Data
 	err = json.Unmarshal(body, &data)
 	if err != nil {
+		http.Error(w, "Error unmarshaling JSON", http.StatusBadRequest)
 		log.Fatal(err)
 	}
 
